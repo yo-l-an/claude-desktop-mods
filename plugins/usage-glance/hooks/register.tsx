@@ -48,7 +48,8 @@ async function readWindows($: EngineInterface): Promise<UsageWindow[]> {
 }
 
 // Reads the limits unless the last reading is younger than `maxAgeMs` or a read is under way.
-async function refresh($: EngineInterface, maxAgeMs: number): Promise<void> {
+// Only a read the person asked for, by clicking the band, shows the spinner.
+async function refresh($: EngineInterface, maxAgeMs: number, isAsked = false): Promise<void> {
   if (isReading) return
 
   const at = await $.clock.now()
@@ -56,8 +57,10 @@ async function refresh($: EngineInterface, maxAgeMs: number): Promise<void> {
   if (last !== null && at - last.fetchedAt < maxAgeMs) return
 
   isReading = true
-  hideSpinner?.cancel()
-  await update($, isSpinning, () => true)
+  if (isAsked) {
+    hideSpinner?.cancel()
+    await update($, isSpinning, () => true)
+  }
   try {
     const next: PlanUsage = { windows: await readWindows($), fetchedAt: at }
 
@@ -67,7 +70,7 @@ async function refresh($: EngineInterface, maxAgeMs: number): Promise<void> {
     $.ui.log(`usage-glance: could not read the plan's usage (${String(error)})`)
   } finally {
     isReading = false
-    hideSpinner = $.clock.after(SPINNER_LINGER_MS, () => void update($, isSpinning, () => false))
+    if (isAsked) hideSpinner = $.clock.after(SPINNER_LINGER_MS, () => void update($, isSpinning, () => false))
   }
 }
 
@@ -119,7 +122,7 @@ export const register: Register = (on, options) => {
   // A click on the band takes its focus ring. A failed read never holds the focus back.
   on('ui.focus', { component: 'AbovePrompt' }, async ($, e, next) => {
     const focused = await next(e)
-    await refresh($, ON_DEMAND_MS)
+    await refresh($, ON_DEMAND_MS, true)
 
     return focused
   }).catch(($, e, next) => next(e))
