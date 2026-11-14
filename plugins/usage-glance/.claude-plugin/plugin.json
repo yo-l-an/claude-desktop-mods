@@ -1,0 +1,12 @@
+{
+  "name": "usage-glance",
+  "version": "1.0.0",
+  "description": "Your session and weekly usage as two quiet rings above the chat input.",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "yo-l-an",
+    "url": "https://github.com/yo-l-an"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/yo-l-an/claude-desktop-mods"
+}

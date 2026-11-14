@@ -4,3 +4,4 @@ node_modules/
 .mcpb-cache/
 .claude-plugin/types/
 plugins/*/.claude-plugin/types/
+dist/

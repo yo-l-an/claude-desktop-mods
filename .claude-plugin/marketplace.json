@@ -1,8 +1,16 @@
 {
   "name": "claude-desktop-mods",
-  "owner": { "name": "yo-l-an" },
+  "owner": {
+    "name": "yo-l-an"
+  },
   "metadata": {
     "description": "Quality of Life Claude Desktop mods."
   },
-  "plugins": []
+  "plugins": [
+    {
+      "name": "usage-glance",
+      "source": "./plugins/usage-glance",
+      "description": "Your session and weekly usage as two quiet rings above the chat input."
+    }
+  ]
 }
