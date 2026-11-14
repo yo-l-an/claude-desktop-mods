@@ -6,13 +6,10 @@
     "validate": "npx claude plugin validate plugins/usage-glance",
     "test": "npx claude plugin test plugins/usage-glance",
     "typecheck": "tsc -p plugins/usage-glance",
-    "check": "npm run validate && npm run typecheck && npm test",
-    "zip": "node scripts/zip.mjs"
+    "check": "npm run validate && npm run typecheck && npm test"
   },
   "devDependencies": {
-    "@anthropic-ai/claude-code": "^2.1.321",
-    "fflate": "^0.8.3",
+    "@anthropic-ai/claude-code": "2.1.321",
     "typescript": "^5.9.3"
-  },
-  "type": "module"
+  }
 }

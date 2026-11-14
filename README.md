@@ -7,17 +7,35 @@ Quality of life mods for the Claude Desktop app (Code).
 
 ## Install
 
-Add the `yo-l-an/claude-desktop-mods` repository as a marketplace, then install the mod.
+In a terminal, add the `yo-l-an/claude-desktop-mods` repository as a marketplace, then install the mod.
 
+```bash
+claude plugin marketplace add yo-l-an/claude-desktop-mods
+claude plugin install usage-glance@claude-desktop-mods
 ```
-/plugin marketplace add yo-l-an/claude-desktop-mods
-/plugin install usage-glance@claude-desktop-mods
+
+To update after a new version is pushed:
+
+```bash
+claude plugin marketplace update claude-desktop-mods
+claude plugin update usage-glance@claude-desktop-mods
 ```
 
 ## Development
 
+On the development machine, install from the working copy instead of GitHub. The app then reads the plugin from this folder:
+
 ```bash
 npm install
-npm run check   # validate the manifest and hooks, type-check, run the tests
-npm run zip     # for local install: pack every plugin into `dist/<name>-<version>.zip`
+claude plugin marketplace add <path to this repository>
+claude plugin install usage-glance@claude-desktop-mods
 ```
+
+Each change:
+
+1. Edit `plugins/<mod>/`.
+2. `npm run check` validates the manifest and hooks, type-checks, and runs the tests.
+3. Run `/reload-plugins` in a Code session (or open a new one) and check the change in the app.
+4. Raise `version` in the mod's `plugin.json`, then commit and push. Other machines only pick up a new version.
+
+The `claude` CLI in `devDependencies` is pinned to the engine version of Claude Desktop. Keep the two the same, because older engines refuse newer props.
