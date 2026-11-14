@@ -118,7 +118,7 @@ export const register: Register = (on, options) => {
                   {item.label}
                 </Text>
               )}
-              <Text size="footnote" weight="medium" tabular>
+              <Text size="footnote" dimColor tabular>
                 {item.percent}%
               </Text>
               <Text size="footnote" dimColor tabular>
