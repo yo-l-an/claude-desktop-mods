@@ -2,10 +2,11 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, McpToolResult, Register } from 'claude-code'
 
 import type { PlanUsage, UsageWindow } from '../types'
-import { formatRemaining } from './format'
+import { layout } from './layout'
 import { RING_SIZE, ringGlyph, ringSvg } from './ring'
-import { THEME_KEYS, levelOf } from './tokens'
+import { THEME_KEYS } from './tokens'
 import { windowsFromCard, windowsFromRateLimits } from './usage'
+import { wordsFor } from './words'
 
 const plan = atom({ plugin: 'usage-glance', key: 'plan' } as const, null)
 const now = atom({ plugin: 'usage-glance', key: 'now' } as const, 0)
@@ -13,10 +14,6 @@ const now = atom({ plugin: 'usage-glance', key: 'now' } as const, 0)
 const TICK_MS = 60_000
 const REFRESH_EVERY_TICKS = 5
 const MIN_REFRESH_MS = 30_000
-// Under this width the labels go and only ring, percent and countdown stay.
-const COMPACT_BELOW_COLUMNS = 56
-
-const LABELS = { session: 'Session', week: 'Week' } as const
 
 const SESSIONS_SERVER = 'ccd_session_mgmt'
 
@@ -64,10 +61,9 @@ async function tick($: EngineInterface): Promise<void> {
   await update($, now, () => at)
 }
 
-const remainingText = (window: UsageWindow, at: number): string | undefined =>
-  window.resetsAt === undefined ? undefined : formatRemaining(Date.parse(window.resetsAt) - at)
+export const register: Register = (on, options) => {
+  const words = wordsFor(options.language)
 
-export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
 
@@ -90,7 +86,7 @@ export const register: Register = on => {
     if (e.props.hasSurvey || current === null || current.windows.length === 0) return next(e)
 
     const at = Math.max(await read($, now), current.fetchedAt)
-    const isCompact = e.props.bodyColumns < COMPACT_BELOW_COLUMNS
+    const items = layout(current.windows, at, words, e.props.bodyColumns)
     const elements = $.ui.resolve(e)
     const { Box, Text } = elements
     // The terminal's table carries an Svg too, drawn as a raster: a glyph reads better there.
@@ -98,37 +94,59 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="row" flexWrap="nowrap" alignItems="center" columnGap={3} overflow="hidden">
-        {current.windows.map(window => {
-          const percent = Math.round(window.percentUsed)
-          const level = levelOf(percent)
-          const remaining = remainingText(window, at)
-          const label = LABELS[window.kind]
+        {items.map(item => {
+          const lines = [
+            { key: 'usage', label: words.usage, value: `${item.percent}%` },
+            { key: 'reset', label: words.reset, value: item.reset },
+          ]
 
           return (
-            <Box key={window.kind} flexDirection="row" flexWrap="nowrap" alignItems="center" columnGap={1} flexShrink={0}>
+            // Keyed: hovering anywhere on the limit opens its popover.
+            <Box key={item.kind} flexDirection="row" flexWrap="nowrap" alignItems="center" columnGap={1} flexShrink={0}>
               {Svg ? (
                 <Svg
-                  source={ringSvg(percent, level)}
-                  alt={`${label}: ${percent}% used`}
+                  source={ringSvg(item.percent, item.level)}
+                  alt={`${item.label} · ${words.usage} ${item.percent}%`}
                   width={RING_SIZE}
                   height={RING_SIZE}
                 />
               ) : (
-                <Text color={THEME_KEYS[level]}>{ringGlyph(percent)}</Text>
+                <Text color={THEME_KEYS[item.level]}>{ringGlyph(item.percent)}</Text>
               )}
-              {!isCompact && (
+              {item.isLabelShown && (
                 <Text size="footnote" dimColor>
-                  {label}
+                  {item.label}
                 </Text>
               )}
               <Text size="footnote" weight="medium" tabular>
-                {percent}%
+                {item.percent}%
               </Text>
-              {remaining !== undefined && (
-                <Text size="footnote" dimColor tabular wrap="truncate">
-                  {remaining}
+              <Text size="footnote" dimColor tabular>
+                {item.detail}
+              </Text>
+              <Box
+                position="absolute"
+                top={0}
+                left={0}
+                width={Math.max(...lines.map(line => line.label.length + line.value.length)) + 2}
+                flexDirection="column"
+                display="none"
+                hover={{ display: 'flex' }}
+              >
+                <Text size="caption">
+                  {item.label}
                 </Text>
-              )}
+                {lines.map(line => (
+                  <Box key={line.key} flexDirection="row" columnGap={1}>
+                    <Text size="footnote" dimColor>
+                      {line.label}
+                    </Text>
+                    <Text size="footnote" tabular>
+                      {line.value}
+                    </Text>
+                  </Box>
+                ))}
+              </Box>
             </Box>
           )
         })}
