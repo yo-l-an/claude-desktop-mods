@@ -11,6 +11,6 @@ export type PlanUsage = { windows: UsageWindow[]; fetchedAt: number }
 
 declare module 'claude-code' {
   interface PluginState {
-    'usage-glance': { plan: PlanUsage | null; now: number }
+    'usage-glance': { plan: PlanUsage | null; now: number; isSpinning: boolean }
   }
 }

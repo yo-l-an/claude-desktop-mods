@@ -4,6 +4,7 @@ export type Words = {
   session: string
   week: string
   notStarted: string
+  refreshing: string
   now: string
   days: string
   minutes: string
@@ -17,6 +18,7 @@ const EN: Words = {
   session: 'Session',
   week: 'Week',
   notStarted: 'not started',
+  refreshing: 'Refreshing usage',
   now: 'now',
   days: 'd',
   minutes: 'm',
@@ -29,6 +31,7 @@ const FR: Words = {
   session: 'Session',
   week: 'Semaine',
   notStarted: 'non démarrée',
+  refreshing: "Actualisation de l'utilisation",
   now: 'maintenant',
   days: 'j',
   minutes: 'min',

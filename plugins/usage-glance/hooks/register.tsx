@@ -1,23 +1,32 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, McpToolResult, Register } from 'claude-code'
+import type { EngineInterface, McpToolResult, Register, Timer } from 'claude-code'
 
 import type { PlanUsage, UsageWindow } from '../types'
 import { layout } from './layout'
-import { RING_SIZE, ringGlyph, ringSvg } from './ring'
+import { RING_SIZE, SPINNER_SIZE, ringGlyph, ringSvg, spinnerSvg } from './ring'
 import { THEME_KEYS } from './tokens'
 import { windowsFromCard, windowsFromRateLimits } from './usage'
 import { wordsFor } from './words'
 
 const plan = atom({ plugin: 'usage-glance', key: 'plan' } as const, null)
 const now = atom({ plugin: 'usage-glance', key: 'now' } as const, 0)
+const isSpinning = atom({ plugin: 'usage-glance', key: 'isSpinning' } as const, false)
 
 const TICK_MS = 60_000
 const REFRESH_EVERY_TICKS = 5
-const MIN_REFRESH_MS = 30_000
+// How fresh a reading must be to skip a read: after a turn, and on a click or a session shown again.
+const AFTER_TURN_MS = 30_000
+const ON_DEMAND_MS = 5_000
+// The spinner stays this long after a read, so a fast read is seen and a read
+// starting meanwhile keeps the same spinner turning rather than a new one.
+const SPINNER_LINGER_MS = 600
 
 const SESSIONS_SERVER = 'ccd_session_mgmt'
 
 let ticks = 0
+let isStarted = false
+let isReading = false
+let hideSpinner: Timer | undefined
 
 const textOf = (result: McpToolResult): string =>
   result.content.flatMap(block => (block.type === 'text' ? [block.text] : [])).join('\n')
@@ -38,11 +47,17 @@ async function readWindows($: EngineInterface): Promise<UsageWindow[]> {
   return windowsFromRateLimits(rateLimits)
 }
 
-async function refresh($: EngineInterface, isForced: boolean): Promise<void> {
+// Reads the limits unless the last reading is younger than `maxAgeMs` or a read is under way.
+async function refresh($: EngineInterface, maxAgeMs: number): Promise<void> {
+  if (isReading) return
+
   const at = await $.clock.now()
   const last = await read($, plan)
-  if (!isForced && last !== null && at - last.fetchedAt < MIN_REFRESH_MS) return
+  if (last !== null && at - last.fetchedAt < maxAgeMs) return
 
+  isReading = true
+  hideSpinner?.cancel()
+  await update($, isSpinning, () => true)
   try {
     const next: PlanUsage = { windows: await readWindows($), fetchedAt: at }
 
@@ -50,12 +65,26 @@ async function refresh($: EngineInterface, isForced: boolean): Promise<void> {
     await update($, now, () => at)
   } catch (error) {
     $.ui.log(`usage-glance: could not read the plan's usage (${String(error)})`)
+  } finally {
+    isReading = false
+    hideSpinner = $.clock.after(SPINNER_LINGER_MS, () => void update($, isSpinning, () => false))
   }
+}
+
+// The first read and the timer, once per load of this module. `session.start`
+// runs it; a `/reload-plugins` reloads the module without that event, so the
+// band's first draw runs it then.
+async function start($: EngineInterface): Promise<void> {
+  if (isStarted) return
+
+  isStarted = true
+  $.clock.every(TICK_MS, () => tick($))
+  await refresh($, 0)
 }
 
 async function tick($: EngineInterface): Promise<void> {
   ticks += 1
-  if (ticks % REFRESH_EVERY_TICKS === 0) return refresh($, true)
+  if (ticks % REFRESH_EVERY_TICKS === 0) return refresh($, 0)
 
   const at = await $.clock.now()
   await update($, now, () => at)
@@ -66,9 +95,7 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-
-    await refresh($, true)
-    $.clock.every(TICK_MS, () => tick($))
+    await start($)
 
     return started
   })
@@ -76,16 +103,34 @@ export const register: Register = (on, options) => {
   // After each turn, and when a window moves a whole point.
   on('session.measure', async ($, e, next) => {
     const measured = await next(e)
-    await refresh($, false)
+    await refresh($, AFTER_TURN_MS)
 
     return measured
   })
 
+  // A surface joining the session, as when it is shown again.
+  on('session.attach', async ($, e, next) => {
+    const attached = await next(e)
+    await refresh($, ON_DEMAND_MS)
+
+    return attached
+  })
+
+  // A click on the band takes its focus ring. A failed read never holds the focus back.
+  on('ui.focus', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const focused = await next(e)
+    await refresh($, ON_DEMAND_MS)
+
+    return focused
+  }).catch(($, e, next) => next(e))
+
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    await start($)
     const current = await read($, plan)
     if (e.props.hasSurvey || current === null || current.windows.length === 0) return next(e)
 
     const at = Math.max(await read($, now), current.fetchedAt)
+    const spinning = await read($, isSpinning)
     const items = layout(current.windows, at, words, e.props.bodyColumns)
     const elements = $.ui.resolve(e)
     const { Box, Text } = elements
@@ -93,7 +138,7 @@ export const register: Register = (on, options) => {
     const Svg = e.surface !== 'terminal' && 'Svg' in elements ? elements.Svg : undefined
 
     return (
-      <Box flexDirection="row" flexWrap="nowrap" alignItems="center" columnGap={3} overflow="hidden">
+      <Box width="100%" flexDirection="row" flexWrap="nowrap" alignItems="center" columnGap={3} overflow="hidden">
         {items.map(item => {
           const lines = [
             { key: 'usage', label: words.usage, value: `${item.percent}%` },
@@ -150,6 +195,16 @@ export const register: Register = (on, options) => {
             </Box>
           )
         })}
+        {spinning && (
+          // Out of the flow at the right edge, so it never pushes the line into a wrap.
+          <Box key="spinner" position="absolute" top={0} bottom={0} right={0} alignItems="center" justifyContent="center">
+            {Svg ? (
+              <Svg source={spinnerSvg()} alt={words.refreshing} width={SPINNER_SIZE} height={SPINNER_SIZE} />
+            ) : (
+              <Text dimColor>⟳</Text>
+            )}
+          </Box>
+        )}
       </Box>
     )
   })

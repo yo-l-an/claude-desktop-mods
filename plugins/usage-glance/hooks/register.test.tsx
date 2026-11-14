@@ -105,6 +105,58 @@ test('a card that cannot read the plan also falls back to the engine', async ($,
   expect(plan?.windows).toHaveLength(2)
 })
 
+// Refresh triggers
+
+// Starts a session on a clock the test moves, counting the usage card reads.
+const startCounting = async ($: Engine, on: On) => {
+  const clock = { at: NOW }
+  const reads = { count: 0 }
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('clock.now', () => ({ value: clock.at }))
+  on('clock.every', () => ({ value: undefined }))
+  on('session.attach', (_, e) => ({ clientId: e.clientId }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  on('mcp.call', () => {
+    reads.count += 1
+    return card('ok', [{ label: '5-hour limit', percentUsed: 10, resetsAt: SESSION_RESET }])
+  })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+
+  return { clock, reads }
+}
+
+test('a session shown again reads the limits, at most once every 5 seconds', async ($, on) => {
+  // Arrange
+  const { clock, reads } = await startCounting($, on)
+
+  // Act
+  clock.at += 3_000
+  await $.session.attach({ surface: 'desktop', clientId: 'desktop:a' })
+  const afterEarly = reads.count
+  clock.at += 3_000
+  await $.session.attach({ surface: 'desktop', clientId: 'desktop:b' })
+
+  // Assert: the start read, none 3 s later, one 6 s later.
+  expect(afterEarly).toBe(1)
+  expect(reads.count).toBe(2)
+})
+
+test('after a turn the limits are read again once 30 seconds have passed', async ($, on) => {
+  // Arrange
+  const { clock, reads } = await startCounting($, on)
+
+  // Act
+  clock.at += 10_000
+  await $.session.measure({ changed: ['turn'] } as never)
+  const afterEarly = reads.count
+  clock.at += 25_000
+  await $.session.measure({ changed: ['turn'] } as never)
+
+  // Assert
+  expect(afterEarly).toBe(1)
+  expect(reads.count).toBe(2)
+})
+
 // Responsive
 
 const WINDOWS = [
