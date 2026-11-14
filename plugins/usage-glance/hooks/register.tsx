@@ -16,7 +16,7 @@ const TICK_MS = 60_000
 const REFRESH_EVERY_TICKS = 5
 // How fresh a reading must be to skip a read: after a turn, and on a click or a session shown again.
 const AFTER_TURN_MS = 30_000
-const ON_DEMAND_MS = 5_000
+const ON_DEMAND_MS = 1_500
 // The spinner stays this long after a read, so a fast read is seen and a read
 // starting meanwhile keeps the same spinner turning rather than a new one.
 const SPINNER_LINGER_MS = 600
