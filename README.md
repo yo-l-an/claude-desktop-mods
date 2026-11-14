@@ -12,7 +12,12 @@ A single, dimmed line that stays out of the way: a ring per limit, its usage and
 <p>
   <img src="assets/usage-glance/wide.png" width="365" alt="Wide: each limit with its usage, reset time and countdown" title="Wide: each limit with its usage, reset time and countdown">
   <img src="assets/usage-glance/medium.png" width="230" alt="Medium: each limit with its usage and countdown only" title="Medium: each limit with its usage and countdown only">
-  <img src="assets/usage-glance/narrow-hover.png" width="200" alt="Narrow: the popover on hover with the session's usage and reset" title="Narrow: the popover on hover with the session's usage and reset">
+  <img src="assets/usage-glance/narrow.png" width="199" alt="Narrow: each limit's ring, usage and countdown, without labels" title="Narrow: each limit's ring, usage and countdown, without labels">
+</p>
+
+<p>
+  <img src="assets/usage-glance/medium-session-hover.png" width="304" alt="Session on hover: usage, reset, the curve so far and how much is used by the reset" title="Session on hover: usage, reset, the curve so far and how much is used by the reset">
+  <img src="assets/usage-glance/medium-week-hover.png" width="307" alt="Week on hover: usage, reset, the curve so far and when the limit is hit" title="Week on hover: usage, reset, the curve so far and when the limit is hit">
 </p>
 
 <br>

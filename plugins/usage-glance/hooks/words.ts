@@ -12,6 +12,12 @@ export type Words = {
   // The popover's line labels, colon included.
   usage: string
   reset: string
+  // The popover's projection, from the usage so far.
+  early: string
+  reached: (resetAt: string) => string
+  hits: (at: string, beforeReset: string) => string
+  lasts: (percent: number) => string
+  graphAlt: string
 }
 
 const EN: Words = {
@@ -25,6 +31,11 @@ const EN: Words = {
   weekdays: ['Sun.', 'Mon.', 'Tue.', 'Wed.', 'Thu.', 'Fri.', 'Sat.'],
   usage: 'Usage:',
   reset: 'Reset:',
+  early: 'Too early to project.',
+  reached: resetAt => `Limit reached until ${resetAt}.`,
+  hits: (at, beforeReset) => `Limit hit around ${at}, ${beforeReset} before reset.`,
+  lasts: percent => `About ${percent}% used by reset.`,
+  graphAlt: 'Usage so far and its projection to the reset',
 }
 
 const FR: Words = {
@@ -38,6 +49,11 @@ const FR: Words = {
   weekdays: ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'],
   usage: 'Utilisation :',
   reset: 'Réinitialisation :',
+  early: 'Trop tôt pour une projection.',
+  reached: resetAt => `Limite atteinte jusqu'à ${resetAt}.`,
+  hits: (at, beforeReset) => `Limite atteinte vers ${at}, ${beforeReset} avant la réinitialisation.`,
+  lasts: percent => `Environ ${percent} % utilisés à la réinitialisation.`,
+  graphAlt: "L'utilisation jusqu'ici et sa projection jusqu'à la réinitialisation",
 }
 
 const systemLocale = (): string => {

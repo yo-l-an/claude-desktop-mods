@@ -1,9 +1,11 @@
 import type { On } from 'claude-code'
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import type { PlanUsage } from '../types'
-import { formatRemaining, formatResetAt } from './format'
+import { formatOutcome, formatRemaining, formatResetAt } from './format'
+import { historyFrom, record } from './history'
+import { project } from './projection'
 import { layout } from './layout'
 import { levelOf } from './tokens'
 import { wordsFor } from './words'
@@ -36,6 +38,7 @@ const engineReading = {
 // Starts a session and answers the plan the mod saved from what it read.
 const startAndReadPlan = async ($: Engine, on: On): Promise<PlanUsage | undefined> => {
   let plan: PlanUsage | undefined
+  mock.store(on)
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('clock.now', () => ({ value: NOW }))
   on('clock.every', () => ({ value: undefined }))
@@ -107,10 +110,39 @@ test('a card that cannot read the plan also falls back to the engine', async ($,
 
 // Refresh triggers
 
+test('after a /reload-plugins, with no session start, the band still reads the limits', { timeoutMs: 20_000 }, async ($, on) => {
+  // Arrange: a reload draws the band without raising session.start.
+  mock.store(on)
+  const clock = mock.clock(on, { now: NOW })
+  on('mcp.call', () => card('ok', [{ label: '5-hour limit', percentUsed: 60, resetsAt: SESSION_RESET }]))
+  const ui = await $.ui.mount({
+    plugin: 'usage-glance',
+    component: 'AbovePrompt',
+    surface: 'desktop',
+    props: {
+      hasSurvey: false,
+      isCollapsed: false,
+      isWorking: false,
+      maxRows: 10,
+      bodyColumns: 120,
+      scroll: { offset: 0, bodyRows: 10 },
+      view: {},
+    },
+  })
+
+  // Act: the read the first draw scheduled runs.
+  await clock.advance(0)
+
+  // Assert
+  expect((await ui.find({ type: 'Text', text: /^60%$/ }))?.text).toBe('60%')
+  await ui.unmount()
+})
+
 // Starts a session on a clock the test moves, counting the usage card reads.
 const startCounting = async ($: Engine, on: On) => {
   const clock = { at: NOW }
   const reads = { count: 0 }
+  mock.store(on)
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('clock.now', () => ({ value: clock.at }))
   on('clock.every', () => ({ value: undefined }))
@@ -125,18 +157,18 @@ const startCounting = async ($: Engine, on: On) => {
   return { clock, reads }
 }
 
-test('a session shown again reads the limits, at most once every 5 seconds', async ($, on) => {
+test('a session shown again reads the limits, at most once every 1.5 seconds', async ($, on) => {
   // Arrange
   const { clock, reads } = await startCounting($, on)
 
   // Act
-  clock.at += 3_000
+  clock.at += 1_000
   await $.session.attach({ surface: 'desktop', clientId: 'desktop:a' })
   const afterEarly = reads.count
-  clock.at += 3_000
+  clock.at += 1_000
   await $.session.attach({ surface: 'desktop', clientId: 'desktop:b' })
 
-  // Assert: the start read, none 3 s later, one 6 s later.
+  // Assert: the start read, none 1 s later, one 2 s later.
   expect(afterEarly).toBe(1)
   expect(reads.count).toBe(2)
 })
@@ -155,6 +187,126 @@ test('after a turn the limits are read again once 30 seconds have passed', async
   // Assert
   expect(afterEarly).toBe(1)
   expect(reads.count).toBe(2)
+})
+
+test('each read adds to the history kept across sessions', async ($, on) => {
+  // Arrange
+  let stored: unknown
+  on('state.set', (_, e, next) => {
+    if ('key' in e && e.key === 'history') stored = e.value
+    return next(e)
+  })
+  const { clock } = await startCounting($, on)
+
+  // Act
+  clock.at += 30 * 60_000
+  await $.session.attach({ surface: 'desktop', clientId: 'desktop:a' })
+
+  // Assert
+  expect(historyFrom(stored).session?.samples).toHaveLength(2)
+})
+
+// History
+
+const HOUR = 3_600_000
+const sessionAt = (percent: number) => [{ kind: 'session' as const, percentUsed: percent, resetsAt: SESSION_RESET }]
+
+test('the history keeps a reading per window and starts over at a new reset', () => {
+  // Act
+  const first = record({}, sessionAt(10), NOW)
+  const later = record(first, sessionAt(20), NOW + 10 * 60_000)
+  const close = record(later, sessionAt(21), NOW + 10 * 60_000 + 5_000)
+  const renewed = record(close, [{ kind: 'session', percentUsed: 1, resetsAt: '2026-11-14T18:26:00.000Z' }], NOW + 2 * HOUR)
+
+  // Assert
+  expect(later.session?.samples.map(sample => sample.percent)).toEqual([10, 20])
+  expect(close.session?.samples.map(sample => sample.percent)).toEqual([10, 21])
+  expect(renewed.session?.samples.map(sample => sample.percent)).toEqual([1])
+})
+
+test('a stored history of the wrong shape is dropped', () => {
+  expect(historyFrom('nope')).toEqual({})
+  expect(historyFrom({ session: { resetsAt: 'x', samples: [] } })).toEqual({})
+  expect(historyFrom({ week: { resetsAt: 1, samples: [{ at: 1, percent: 2 }, { at: 'bad' }] } })).toEqual({
+    week: { resetsAt: 1, samples: [{ at: 1, percent: 2 }] },
+  })
+})
+
+// Projection: the session window runs from 08:26 to 13:26 UTC.
+
+const SESSION_START = Date.parse(SESSION_RESET) - 5 * HOUR
+const sessionWindow = (percent: number) => ({ kind: 'session' as const, percentUsed: percent, resetsAt: SESSION_RESET })
+
+test('at a fast pace the projection says when the limit is reached', () => {
+  // Arrange: 60% used 2.5 hours in, so 24% an hour.
+  const at = SESSION_START + 2.5 * HOUR
+
+  // Act
+  const projection = project(sessionWindow(60), undefined, at)
+
+  // Assert: the remaining 40% takes 1h40, 50 minutes before the reset.
+  const hitsAt = at + (100 / 60) * HOUR
+  expect(projection?.outcome).toEqual({ kind: 'hits', at: hitsAt })
+  expect(formatOutcome('session', projection!, EN)).toBe(
+    `Limit hit around ${clock(new Date(hitsAt).toISOString())}, 50m before reset.`,
+  )
+})
+
+test('at a slow pace the projection says how much is used by the reset', () => {
+  // Act: 20% used 2.5 hours in carries to 40% at the reset.
+  const projection = project(sessionWindow(20), undefined, SESSION_START + 2.5 * HOUR)
+
+  // Assert
+  expect(projection?.outcome).toEqual({ kind: 'lasts', percent: 40 })
+  expect(formatOutcome('session', projection!, EN)).toBe('About 40% used by reset.')
+})
+
+// 40% used 2.5 hours in: 16% an hour on average, so 80% by the reset without readings.
+const readingAt = (hours: number, percent: number) => ({
+  resetsAt: Date.parse(SESSION_RESET),
+  samples: [{ at: SESSION_START + hours * HOUR, percent }],
+})
+
+test('a burst in the last hour brings the limit forward', () => {
+  // Act: 30% of the 40% went in the last hour.
+  const projection = project(sessionWindow(40), readingAt(1.5, 10), SESSION_START + 2.5 * HOUR)
+
+  // Assert: 0.6 × 30 + 0.4 × 16 = 24.4% an hour, the remaining 60% in about 2h28.
+  expect(project(sessionWindow(40), undefined, SESSION_START + 2.5 * HOUR)?.outcome).toEqual({ kind: 'lasts', percent: 80 })
+  expect(projection?.outcome.kind).toBe('hits')
+  if (projection?.outcome.kind === 'hits') {
+    expect(Math.round((projection.outcome.at - SESSION_START) / 60_000)).toBe(Math.round(150 + (60 / 24.4) * 60))
+  }
+})
+
+test('a pause in the last hour pushes the limit back', () => {
+  // Act: nothing used in the last hour, so 0.6 × 0 + 0.4 × 16 = 6.4% an hour.
+  const projection = project(sessionWindow(40), readingAt(1.5, 40), SESSION_START + 2.5 * HOUR)
+
+  // Assert
+  expect(projection?.outcome).toEqual({ kind: 'lasts', percent: 56 })
+})
+
+test('too early in a window, or at the limit, there is no pace to carry on', () => {
+  expect(project(sessionWindow(5), undefined, SESSION_START + 5 * 60_000)?.outcome).toEqual({ kind: 'early' })
+  expect(project(sessionWindow(100), undefined, SESSION_START + HOUR)?.outcome).toEqual({ kind: 'reached' })
+  expect(project({ kind: 'session', percentUsed: 0 }, undefined, NOW)).toBeUndefined()
+})
+
+test('the projected path runs from the window start through the readings to now', () => {
+  // Arrange
+  const at = SESSION_START + 2 * HOUR
+  const history = { resetsAt: Date.parse(SESSION_RESET), samples: [{ at: SESSION_START - HOUR, percent: 90 }, { at: SESSION_START + HOUR, percent: 30 }] }
+
+  // Act
+  const projection = project(sessionWindow(50), history, at)
+
+  // Assert: the reading from before the window is left out.
+  expect(projection?.path).toEqual([
+    { at: SESSION_START, percent: 0 },
+    { at: SESSION_START + HOUR, percent: 30 },
+    { at, percent: 50 },
+  ])
 })
 
 // Responsive

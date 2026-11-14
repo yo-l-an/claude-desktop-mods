@@ -2,7 +2,11 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, McpToolResult, Register, Timer } from 'claude-code'
 
 import type { PlanUsage, UsageWindow } from '../types'
+import { formatOutcome } from './format'
+import { GRAPH_HEIGHT, GRAPH_WIDTH, graphSvg } from './graph'
+import { historyFrom, record } from './history'
 import { layout } from './layout'
+import { project } from './projection'
 import { RING_SIZE, SPINNER_SIZE, ringGlyph, ringSvg, spinnerSvg } from './ring'
 import { THEME_KEYS } from './tokens'
 import { windowsFromCard, windowsFromRateLimits } from './usage'
@@ -11,6 +15,11 @@ import { wordsFor } from './words'
 const plan = atom({ plugin: 'usage-glance', key: 'plan' } as const, null)
 const now = atom({ plugin: 'usage-glance', key: 'now' } as const, 0)
 const isSpinning = atom({ plugin: 'usage-glance', key: 'isSpinning' } as const, false)
+const history = atom({ plugin: 'usage-glance', key: 'history' } as const, {})
+// The readings outlive the session, so every session's popover draws the same curve.
+const HISTORY_KEY = 'history'
+// The popover is at least this wide, in cells, to hold the graph.
+const POPOVER_MIN_CELLS = 18
 
 const TICK_MS = 60_000
 const REFRESH_EVERY_TICKS = 5
@@ -63,7 +72,11 @@ async function refresh($: EngineInterface, maxAgeMs: number, isAsked = false): P
   }
   try {
     const next: PlanUsage = { windows: await readWindows($), fetchedAt: at }
+    // Merged with what other sessions stored since: they all add to one history.
+    const recorded = record(historyFrom(await $.store.get(HISTORY_KEY)), next.windows, at)
 
+    await $.store.set(HISTORY_KEY, recorded)
+    await update($, history, () => recorded)
     await update($, plan, () => next)
     await update($, now, () => at)
   } catch (error) {
@@ -76,7 +89,7 @@ async function refresh($: EngineInterface, maxAgeMs: number, isAsked = false): P
 
 // The first read and the timer, once per load of this module. `session.start`
 // runs it; a `/reload-plugins` reloads the module without that event, so the
-// band's first draw runs it then.
+// band's first draw schedules it then (a draw itself may not write state).
 async function start($: EngineInterface): Promise<void> {
   if (isStarted) return
 
@@ -128,13 +141,14 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    await start($)
+    if (!isStarted) $.clock.after(0, () => void start($))
     const current = await read($, plan)
     if (e.props.hasSurvey || current === null || current.windows.length === 0) return next(e)
 
     const at = Math.max(await read($, now), current.fetchedAt)
     const spinning = await read($, isSpinning)
     const items = layout(current.windows, at, words, e.props.bodyColumns)
+    const readings = await read($, history)
     const elements = $.ui.resolve(e)
     const { Box, Text } = elements
     // The terminal's table carries an Svg too, drawn as a raster: a glyph reads better there.
@@ -147,6 +161,8 @@ export const register: Register = (on, options) => {
             { key: 'usage', label: words.usage, value: `${item.percent}%` },
             { key: 'reset', label: words.reset, value: item.reset },
           ]
+          const window = current.windows.find(candidate => candidate.kind === item.kind)
+          const projection = window && project(window, readings[item.kind], at)
 
           return (
             // Keyed: hovering anywhere on the limit opens its popover.
@@ -176,7 +192,7 @@ export const register: Register = (on, options) => {
                 position="absolute"
                 top={0}
                 left={0}
-                width={Math.max(...lines.map(line => line.label.length + line.value.length)) + 2}
+                width={Math.max(POPOVER_MIN_CELLS, ...lines.map(line => line.label.length + line.value.length + 2))}
                 flexDirection="column"
                 display="none"
                 hover={{ display: 'flex' }}
@@ -194,6 +210,16 @@ export const register: Register = (on, options) => {
                     </Text>
                   </Box>
                 ))}
+                {projection && (
+                  <Box key="projection" flexDirection="column" rowGap={1} marginTop={1}>
+                    {Svg && (
+                      <Svg source={graphSvg(projection)} alt={words.graphAlt} width={GRAPH_WIDTH} height={GRAPH_HEIGHT} />
+                    )}
+                    <Text size="footnote" dimColor>
+                      {formatOutcome(item.kind, projection, words)}
+                    </Text>
+                  </Box>
+                )}
               </Box>
             </Box>
           )

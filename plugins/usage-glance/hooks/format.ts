@@ -1,4 +1,5 @@
 import type { WindowKind } from '../types'
+import type { Projection } from './projection'
 import type { Words } from './words'
 
 const MINUTE_MS = 60_000
@@ -27,4 +28,20 @@ export const formatResetAt = (kind: WindowKind, at: number, words: Words): strin
   const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`
 
   return kind === 'session' ? clock : `${words.weekdays[date.getDay()] ?? ''} ${clock}`
+}
+
+// What the projection says will happen, in a sentence.
+export const formatOutcome = (kind: WindowKind, projection: Projection, words: Words): string => {
+  const { outcome, end } = projection
+
+  switch (outcome.kind) {
+    case 'early':
+      return words.early
+    case 'reached':
+      return words.reached(formatResetAt(kind, end, words))
+    case 'hits':
+      return words.hits(formatResetAt(kind, outcome.at, words), formatRemaining(end - outcome.at, words))
+    case 'lasts':
+      return words.lasts(outcome.percent)
+  }
 }
