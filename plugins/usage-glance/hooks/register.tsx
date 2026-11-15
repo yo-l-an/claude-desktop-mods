@@ -211,9 +211,16 @@ export const register: Register = (on, options) => {
                   </Box>
                 ))}
                 {projection && (
-                  <Box key="projection" flexDirection="column" rowGap={1} marginTop={1}>
+                  <Box flexDirection="column" marginTop={1}>
                     {Svg && (
-                      <Svg source={graphSvg(projection)} alt={words.graphAlt} width={GRAPH_WIDTH} height={GRAPH_HEIGHT} />
+                      // Interactive when there is a ghost: the drawing's own hover lights it.
+                      <Svg
+                        source={graphSvg(projection, words.previous[item.kind])}
+                        alt={words.graphAlt}
+                        width={GRAPH_WIDTH}
+                        height={GRAPH_HEIGHT}
+                        {...(projection.previous && { isInteractive: true })}
+                      />
                     )}
                     <Text size="footnote" dimColor>
                       {formatOutcome(item.kind, projection, words)}

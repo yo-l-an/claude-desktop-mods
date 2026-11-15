@@ -11,7 +11,9 @@ export type PlanUsage = { windows: UsageWindow[]; fetchedAt: number }
 
 // The readings of one window, from its start to its reset.
 export type Sample = { at: number; percent: number }
-export type WindowHistory = { resetsAt: number; samples: Sample[] }
+export type WindowReadings = { resetsAt: number; samples: Sample[] }
+// The current window's readings, and the last window's until the next one starts.
+export type WindowHistory = WindowReadings & { previous?: WindowReadings }
 export type History = Partial<Record<WindowKind, WindowHistory>>
 
 declare module 'claude-code' {

@@ -1,0 +1,16 @@
+{
+  "name": "claude-desktop-mods-dev",
+  "owner": {
+    "name": "yo-l-an"
+  },
+  "metadata": {
+    "description": "The mods from this checkout, to test them before pushing."
+  },
+  "plugins": [
+    {
+      "name": "usage-glance",
+      "source": "./plugins/usage-glance",
+      "description": "Your session and weekly usage as two quiet rings above the chat input."
+    }
+  ]
+}

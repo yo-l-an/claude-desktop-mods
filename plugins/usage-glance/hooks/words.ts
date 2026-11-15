@@ -18,6 +18,8 @@ export type Words = {
   hits: (at: string, beforeReset: string) => string
   lasts: (percent: number) => string
   graphAlt: string
+  // The line under the graph while its ghost, the last window, is hovered.
+  previous: Record<'session' | 'week', string>
 }
 
 const EN: Words = {
@@ -36,6 +38,7 @@ const EN: Words = {
   hits: (at, beforeReset) => `Limit hit around ${at}, ${beforeReset} before reset.`,
   lasts: percent => `About ${percent}% used by reset.`,
   graphAlt: 'Usage so far and its projection to the reset',
+  previous: { session: 'Previous session', week: 'Previous week' },
 }
 
 const FR: Words = {
@@ -54,6 +57,7 @@ const FR: Words = {
   hits: (at, beforeReset) => `Limite atteinte vers ${at}, ${beforeReset} avant la réinitialisation.`,
   lasts: percent => `Environ ${percent} % utilisés à la réinitialisation.`,
   graphAlt: "L'utilisation jusqu'ici et sa projection jusqu'à la réinitialisation",
+  previous: { session: 'Session précédente', week: 'Semaine précédente' },
 }
 
 const systemLocale = (): string => {

@@ -1,10 +1,14 @@
+import type { Sample } from '../types'
 import type { Projection } from './projection'
 import { COLORS, TRACK, levelOf } from './tokens'
 
 // A minimal chart of one window: no axes or values, only shapes. The left edge is
 // the window's start, the right edge its reset, the dashed top line the limit.
 export const GRAPH_WIDTH = 126
-export const GRAPH_HEIGHT = 33
+const PLOT_HEIGHT = 33
+// A strip under the plot, where the ghost is named while the plot is hovered.
+const LABEL_HEIGHT = 9
+export const GRAPH_HEIGHT = PLOT_HEIGHT + LABEL_HEIGHT
 const PAD = 3
 
 type Point = { x: number; y: number }
@@ -42,31 +46,68 @@ const smoothPath = (points: Point[]): string => {
   return `M${first.x.toFixed(1)},${first.y.toFixed(1)}${segments.join('')}`
 }
 
-export const graphSvg = (projection: Projection): string => {
-  const { start, end, now, percent, path, outcome } = projection
-  const xOf = (at: number) => PAD + ((at - start) / (end - start)) * (GRAPH_WIDTH - 2 * PAD)
-  const yOf = (value: number) => GRAPH_HEIGHT - PAD - (Math.min(100, value) / 100) * (GRAPH_HEIGHT - 2 * PAD)
+// The window's time across, its usage up, in the drawing's pixels.
+const scaleOf = ({ start, end }: Projection) => ({
+  xOf: (at: number) => PAD + ((at - start) / (end - start)) * (GRAPH_WIDTH - 2 * PAD),
+  yOf: (value: number) => PLOT_HEIGHT - PAD - (Math.min(100, value) / 100) * (PLOT_HEIGHT - 2 * PAD),
+})
+
+// Readings closer than a pixel apart add nothing but kinks: the latest of them stays.
+const curveOf = (projection: Projection, samples: Sample[]): string => {
+  const { xOf, yOf } = scaleOf(projection)
+  const points = samples
+    .map(sample => ({ x: xOf(sample.at), y: yOf(sample.percent) }))
+    .filter((point, i, all) => i === all.length - 1 || all[i + 1]!.x - point.x >= 1)
+
+  return smoothPath(points)
+}
+
+const svgOf = (content: string): string =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${GRAPH_WIDTH}" height="${GRAPH_HEIGHT}" viewBox="0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}">${content}</svg>`
+
+// Escapes the five characters XML reads as markup.
+const escaped = (text: string): string =>
+  text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char]!)
+
+// Only the plot takes the pointer. Hovering it brings the last window's line to
+// the front, dims this one's and names the ghost in the strip below.
+const HOVER_STYLE =
+  '<style>*{pointer-events:none}.plot{pointer-events:all}.front,.label{opacity:0}' +
+  '.plot:hover~.front,.plot:hover~.label{opacity:1}.plot:hover~.back{opacity:0}.plot:hover~.current{opacity:.3}</style>'
+
+const ghostLine = (projection: Projection, samples: Sample[], className: string, opacity: number): string =>
+  `<path class="${className}" d="${curveOf(projection, samples)}" fill="none" stroke="${TRACK.color}" ` +
+  `stroke-opacity="${opacity}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`
+
+// With a ghost, the graph is drawn interactive so its own hover can light it.
+export const graphSvg = (projection: Projection, previousLabel: string): string => {
+  const { end, now, percent, path, outcome, previous } = projection
+  const { xOf, yOf } = scaleOf(projection)
   const x = (at: number) => xOf(at).toFixed(1)
   const y = (value: number) => yOf(value).toFixed(1)
 
-  // Readings closer than a pixel apart add nothing but kinks: the latest of them stays.
-  const points = path
-    .map(sample => ({ x: xOf(sample.at), y: yOf(sample.percent) }))
-    .filter((point, i, all) => i === all.length - 1 || all[i + 1]!.x - point.x >= 1)
   const target =
     outcome.kind === 'hits' ? { at: outcome.at, percent: 100 } : outcome.kind === 'lasts' ? { at: end, percent: outcome.percent } : undefined
   const targetColor = COLORS[levelOf(target?.percent ?? percent)]
 
   const limit = `<line x1="${PAD}" y1="${y(100)}" x2="${GRAPH_WIDTH - PAD}" y2="${y(100)}" stroke="${TRACK.color}" stroke-opacity="${TRACK.opacity}" stroke-dasharray="2 3"/>`
-  const reset = `<line x1="${GRAPH_WIDTH - PAD}" y1="${PAD}" x2="${GRAPH_WIDTH - PAD}" y2="${GRAPH_HEIGHT - PAD}" stroke="${TRACK.color}" stroke-opacity="${TRACK.opacity}"/>`
-  const usedLine = `<path d="${smoothPath(points)}" fill="none" stroke="${COLORS[levelOf(percent)]}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`
+  const reset = `<line x1="${GRAPH_WIDTH - PAD}" y1="${PAD}" x2="${GRAPH_WIDTH - PAD}" y2="${PLOT_HEIGHT - PAD}" stroke="${TRACK.color}" stroke-opacity="${TRACK.opacity}"/>`
+  const usedLine = `<path d="${curveOf(projection, path)}" fill="none" stroke="${COLORS[levelOf(percent)]}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`
   const projected = target
     ? `<line x1="${x(now)}" y1="${y(percent)}" x2="${x(target.at)}" y2="${y(target.percent)}" stroke="${targetColor}" stroke-width="1.5" stroke-dasharray="3 3" stroke-linecap="round" opacity="0.8"/>` +
       `<circle cx="${x(target.at)}" cy="${y(target.percent)}" r="2.5" fill="${targetColor}"/>`
     : ''
+  const current = `<g class="current">${usedLine}${projected}</g>`
+  if (previous === undefined) return svgOf(`${limit}${reset}${current}`)
 
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${GRAPH_WIDTH}" height="${GRAPH_HEIGHT}" viewBox="0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}">` +
-    `${limit}${reset}${usedLine}${projected}</svg>`
+  // The whole drawing takes the pointer, not only its strokes.
+  const hitArea = `<rect class="plot" width="${GRAPH_WIDTH}" height="${PLOT_HEIGHT}" fill="transparent"/>`
+  const label =
+    `<text class="label" x="${PAD}" y="${PLOT_HEIGHT + 7}" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" ` +
+    `font-size="11" fill="${TRACK.color}">${escaped(previousLabel)}</text>`
+
+  return svgOf(
+    `${HOVER_STYLE}${hitArea}${limit}${reset}${ghostLine(projection, previous, 'back', TRACK.opacity)}${current}` +
+      `${ghostLine(projection, previous, 'front', 1)}${label}`,
   )
 }

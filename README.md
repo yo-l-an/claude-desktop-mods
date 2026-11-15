@@ -40,13 +40,15 @@ claude plugin update usage-glance@claude-desktop-mods
 
 ## Development
 
-On the development machine, install from the working copy instead of GitHub. The app then reads the plugin from this folder:
+On the development machine, install from the working copy too. The app then reads the plugin from this folder. `.claude-plugin/marketplace.dev.json` lists the same mods as `claude-desktop-mods-dev`, so it sits beside the GitHub marketplace instead of replacing it:
 
 ```bash
 npm install
-claude plugin marketplace add <path to this repository>
-claude plugin install usage-glance@claude-desktop-mods
+claude plugin marketplace add <path to this repository>/.claude-plugin/marketplace.dev.json
+claude plugin install usage-glance@claude-desktop-mods-dev
 ```
+
+Keep one of the two copies of a mod enabled at a time, or both draw. Switch with `claude plugin disable usage-glance@claude-desktop-mods` and `claude plugin enable usage-glance@claude-desktop-mods-dev`, then `/reload-plugins`.
 
 Each change:
 

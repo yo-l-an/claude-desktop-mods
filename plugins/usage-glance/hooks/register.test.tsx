@@ -222,6 +222,18 @@ test('the history keeps a reading per window and starts over at a new reset', ()
   expect(later.session?.samples.map(sample => sample.percent)).toEqual([10, 20])
   expect(close.session?.samples.map(sample => sample.percent)).toEqual([10, 21])
   expect(renewed.session?.samples.map(sample => sample.percent)).toEqual([1])
+  expect(renewed.session?.previous?.samples.map(sample => sample.percent)).toEqual([10, 21])
+})
+
+test('only the window that ended last is kept as the previous', () => {
+  // Act
+  const first = record({}, sessionAt(30), NOW)
+  const second = record(first, [{ kind: 'session', percentUsed: 5, resetsAt: '2026-11-14T18:26:00.000Z' }], NOW + 6 * HOUR)
+  const third = record(second, [{ kind: 'session', percentUsed: 2, resetsAt: '2026-11-14T23:26:00.000Z' }], NOW + 11 * HOUR)
+
+  // Assert
+  expect(third.session?.previous?.samples.map(sample => sample.percent)).toEqual([5])
+  expect(historyFrom(JSON.parse(JSON.stringify(third)))).toEqual(third)
 })
 
 test('a stored history of the wrong shape is dropped', () => {
@@ -285,6 +297,35 @@ test('a pause in the last hour pushes the limit back', () => {
 
   // Assert
   expect(projection?.outcome).toEqual({ kind: 'lasts', percent: 56 })
+})
+
+// The last session ran the day before; only its readings matter, shifted onto this one.
+const withPrevious = (previous: [number, number][]) => ({
+  resetsAt: Date.parse(SESSION_RESET),
+  samples: [],
+  previous: {
+    resetsAt: Date.parse(SESSION_RESET) - 24 * HOUR,
+    samples: previous.map(([hours, percent]) => ({ at: SESSION_START - 24 * HOUR + hours * HOUR, percent })),
+  },
+})
+
+test('a last session that kept going raises the projection', () => {
+  // Act: it went from 20% to 80% over the 2.5 hours still to come, 24% an hour,
+  // so 0.45 × 16 + 0.25 × 16 + 0.3 × 24 = 18.4% an hour.
+  const projection = project(sessionWindow(40), withPrevious([[2.5, 20], [5, 80]]), SESSION_START + 2.5 * HOUR)
+
+  // Assert
+  expect(projection?.outcome).toEqual({ kind: 'lasts', percent: 86 })
+  expect(projection?.previous?.map(sample => sample.percent)).toEqual([0, 20, 80])
+  expect(projection?.previous?.[1]?.at).toBe(SESSION_START + 2.5 * HOUR)
+})
+
+test('a last session that stopped here lowers the projection', () => {
+  // Act: nothing used after this point, so 0.7 × 16 = 11.2% an hour.
+  const projection = project(sessionWindow(40), withPrevious([[2.5, 20], [4, 20]]), SESSION_START + 2.5 * HOUR)
+
+  // Assert
+  expect(projection?.outcome).toEqual({ kind: 'lasts', percent: 68 })
 })
 
 test('too early in a window, or at the limit, there is no pace to carry on', () => {
@@ -374,9 +415,9 @@ test('countdowns', () => {
   expect(formatRemaining((5 * 24 + 16) * 3_600_000, FR)).toBe('5j 16h')
 })
 
-test('levels follow the app: yellow from 70%, red from 90%', () => {
-  expect(levelOf(69)).toBe('normal')
-  expect(levelOf(70)).toBe('warn')
+test('levels follow the app: yellow from 75%, red from 90%', () => {
+  expect(levelOf(74)).toBe('normal')
+  expect(levelOf(75)).toBe('warn')
   expect(levelOf(89)).toBe('warn')
   expect(levelOf(90)).toBe('danger')
 })
