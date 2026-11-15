@@ -3,9 +3,10 @@
 Quality of life mods for the Claude Desktop app (Code).
 
 ## Mods
-- [usage-glance](plugins/usage-glance): Your session and weekly usage as two quiet rings above the chat input.
 
-### usage-glance
+### [usage-glance](plugins/usage-glance)
+
+> Your session and weekly usage as two quiet rings above the chat input.
 
 A single, dimmed line that stays out of the way: a ring per limit, its usage and when it resets, colored like the app's own usage ring. It adapts to the width available, dropping detail as room runs out, and hovering a limit shows its full usage and reset in a popover. Nothing to open or click.
 
