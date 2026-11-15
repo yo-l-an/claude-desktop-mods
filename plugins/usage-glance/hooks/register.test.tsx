@@ -213,10 +213,10 @@ const sessionAt = (percent: number) => [{ kind: 'session' as const, percentUsed:
 
 test('the history keeps a reading per window and starts over at a new reset', () => {
   // Act
-  const first = record({}, sessionAt(10), NOW)
-  const later = record(first, sessionAt(20), NOW + 10 * 60_000)
-  const close = record(later, sessionAt(21), NOW + 10 * 60_000 + 5_000)
-  const renewed = record(close, [{ kind: 'session', percentUsed: 1, resetsAt: '2026-11-14T18:26:00.000Z' }], NOW + 2 * HOUR)
+  const first = record({}, sessionAt(10), NOW, 'card')
+  const later = record(first, sessionAt(20), NOW + 10 * 60_000, 'card')
+  const close = record(later, sessionAt(21), NOW + 10 * 60_000 + 5_000, 'card')
+  const renewed = record(close, [{ kind: 'session', percentUsed: 1, resetsAt: '2026-11-14T18:26:00.000Z' }], NOW + 2 * HOUR, 'card')
 
   // Assert
   expect(later.session?.samples.map(sample => sample.percent)).toEqual([10, 20])
@@ -227,9 +227,9 @@ test('the history keeps a reading per window and starts over at a new reset', ()
 
 test('only the window that ended last is kept as the previous', () => {
   // Act
-  const first = record({}, sessionAt(30), NOW)
-  const second = record(first, [{ kind: 'session', percentUsed: 5, resetsAt: '2026-11-14T18:26:00.000Z' }], NOW + 6 * HOUR)
-  const third = record(second, [{ kind: 'session', percentUsed: 2, resetsAt: '2026-11-14T23:26:00.000Z' }], NOW + 11 * HOUR)
+  const first = record({}, sessionAt(30), NOW, 'card')
+  const second = record(first, [{ kind: 'session', percentUsed: 5, resetsAt: '2026-11-14T18:26:00.000Z' }], NOW + 6 * HOUR, 'card')
+  const third = record(second, [{ kind: 'session', percentUsed: 2, resetsAt: '2026-11-14T23:26:00.000Z' }], NOW + 11 * HOUR, 'card')
 
   // Assert
   expect(third.session?.previous?.samples.map(sample => sample.percent)).toEqual([5])
@@ -239,9 +239,35 @@ test('only the window that ended last is kept as the previous', () => {
 test('a stored history of the wrong shape is dropped', () => {
   expect(historyFrom('nope')).toEqual({})
   expect(historyFrom({ session: { resetsAt: 'x', samples: [] } })).toEqual({})
-  expect(historyFrom({ week: { resetsAt: 1, samples: [{ at: 1, percent: 2 }, { at: 'bad' }] } })).toEqual({
-    week: { resetsAt: 1, samples: [{ at: 1, percent: 2 }] },
+  expect(historyFrom({ week: { resetsAt: 1, source: 'card', samples: [{ at: 1, percent: 2 }, { at: 'bad' }] } })).toEqual({
+    week: { resetsAt: 1, source: 'card', samples: [{ at: 1, percent: 2 }] },
   })
+  // Kept before readings had a source, it may mix the card's and the engine's limits.
+  expect(historyFrom({ week: { resetsAt: 1, samples: [{ at: 1, percent: 2 }] } })).toEqual({})
+})
+
+test('a reset time that drifts within a window is not a new window', () => {
+  // Act: the same session read with its reset 10 minutes off.
+  const first = record({}, sessionAt(10), NOW, 'card')
+  const drifted = record(first, [{ kind: 'session', percentUsed: 25, resetsAt: '2026-11-14T13:36:00.000Z' }], NOW + 10 * 60_000, 'card')
+
+  // Assert
+  expect(drifted.session?.samples.map(sample => sample.percent)).toEqual([10, 25])
+  expect(drifted.session?.previous).toBeUndefined()
+})
+
+test("the engine's readings stay out of a history the card keeps", () => {
+  // Arrange: the engine counts another weekly limit, with its own reset.
+  const fromCard = record({}, sessionAt(40), NOW, 'card')
+  const engineWindows = [{ kind: 'session' as const, percentUsed: 2, resetsAt: '2026-11-14T18:00:00.000Z' }]
+
+  // Act
+  const withEngine = record(fromCard, engineWindows, NOW + HOUR, 'engine')
+  const engineFirst = record(record({}, engineWindows, NOW, 'engine'), sessionAt(40), NOW + HOUR, 'card')
+
+  // Assert: the card's readings start over a history the engine began, with no ghost.
+  expect(withEngine).toEqual(fromCard)
+  expect(engineFirst.session).toEqual({ resetsAt: Date.parse(SESSION_RESET), source: 'card', samples: [{ at: NOW + HOUR, percent: 40 }] })
 })
 
 // Projection: the session window runs from 08:26 to 13:26 UTC.
@@ -276,6 +302,7 @@ test('at a slow pace the projection says how much is used by the reset', () => {
 // 40% used 2.5 hours in: 16% an hour on average, so 80% by the reset without readings.
 const readingAt = (hours: number, percent: number) => ({
   resetsAt: Date.parse(SESSION_RESET),
+  source: 'card' as const,
   samples: [{ at: SESSION_START + hours * HOUR, percent }],
 })
 
@@ -302,6 +329,7 @@ test('a pause in the last hour pushes the limit back', () => {
 // The last session ran the day before; only its readings matter, shifted onto this one.
 const withPrevious = (previous: [number, number][]) => ({
   resetsAt: Date.parse(SESSION_RESET),
+  source: 'card' as const,
   samples: [],
   previous: {
     resetsAt: Date.parse(SESSION_RESET) - 24 * HOUR,
@@ -337,7 +365,7 @@ test('too early in a window, or at the limit, there is no pace to carry on', () 
 test('the projected path runs from the window start through the readings to now', () => {
   // Arrange
   const at = SESSION_START + 2 * HOUR
-  const history = { resetsAt: Date.parse(SESSION_RESET), samples: [{ at: SESSION_START - HOUR, percent: 90 }, { at: SESSION_START + HOUR, percent: 30 }] }
+  const history = { resetsAt: Date.parse(SESSION_RESET), source: 'card' as const, samples: [{ at: SESSION_START - HOUR, percent: 90 }, { at: SESSION_START + HOUR, percent: 30 }] }
 
   // Act
   const projection = project(sessionWindow(50), history, at)

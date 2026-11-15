@@ -1,6 +1,6 @@
 import type { Sample } from '../types'
 import type { Projection } from './projection'
-import { COLORS, TRACK, levelOf } from './tokens'
+import { COLORS, DANGER_FROM, TRACK, WARN_FROM, levelOf } from './tokens'
 
 // A minimal chart of one window: no axes or values, only shapes. The left edge is
 // the window's start, the right edge its reset, the dashed top line the limit.
@@ -44,6 +44,26 @@ const smoothPath = (points: Point[]): string => {
   })
 
   return `M${first.x.toFixed(1)},${first.y.toFixed(1)}${segments.join('')}`
+}
+
+// Each color change on the projection blends over this many points each side of its threshold.
+const BLEND_POINTS = 4
+
+// The projection's colors from `from`% to `to`%: the ring's color at each usage,
+// blue to yellow at the warning, yellow to red at the danger threshold.
+const projectionStops = (from: number, to: number): string => {
+  const offsetOf = (value: number) => Math.min(1, Math.max(0, (value - from) / (to - from)))
+  const stop = (value: number, color: string) => `<stop offset="${offsetOf(value).toFixed(3)}" stop-color="${color}"/>`
+  const changes = [
+    { at: WARN_FROM, before: COLORS.normal, after: COLORS.warn },
+    { at: DANGER_FROM, before: COLORS.warn, after: COLORS.danger },
+  ].filter(change => change.at > from && change.at < to)
+
+  return [
+    stop(from, COLORS[levelOf(from)]),
+    ...changes.flatMap(change => [stop(change.at - BLEND_POINTS, change.before), stop(change.at + BLEND_POINTS, change.after)]),
+    stop(to, COLORS[levelOf(to)]),
+  ].join('')
 }
 
 // The window's time across, its usage up, in the drawing's pixels.
@@ -93,8 +113,15 @@ export const graphSvg = (projection: Projection, previousLabel: string): string 
   const limit = `<line x1="${PAD}" y1="${y(100)}" x2="${GRAPH_WIDTH - PAD}" y2="${y(100)}" stroke="${TRACK.color}" stroke-opacity="${TRACK.opacity}" stroke-dasharray="2 3"/>`
   const reset = `<line x1="${GRAPH_WIDTH - PAD}" y1="${PAD}" x2="${GRAPH_WIDTH - PAD}" y2="${PLOT_HEIGHT - PAD}" stroke="${TRACK.color}" stroke-opacity="${TRACK.opacity}"/>`
   const usedLine = `<path d="${curveOf(projection, path)}" fill="none" stroke="${COLORS[levelOf(percent)]}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`
+  const ends = target && `x1="${x(now)}" y1="${y(percent)}" x2="${x(target.at)}" y2="${y(target.percent)}"`
+  // Colored along its length by the usage it reaches, where it climbs at all.
+  const stroke = target && target.percent > percent ? 'url(#projection)' : targetColor
+  const gradient =
+    target && target.percent > percent
+      ? `<defs><linearGradient id="projection" gradientUnits="userSpaceOnUse" ${ends}>${projectionStops(percent, target.percent)}</linearGradient></defs>`
+      : ''
   const projected = target
-    ? `<line x1="${x(now)}" y1="${y(percent)}" x2="${x(target.at)}" y2="${y(target.percent)}" stroke="${targetColor}" stroke-width="1.5" stroke-dasharray="3 3" stroke-linecap="round" opacity="0.8"/>` +
+    ? `${gradient}<line ${ends} stroke="${stroke}" stroke-width="1.5" stroke-dasharray="3 3" stroke-linecap="round" opacity="0.8"/>` +
       `<circle cx="${x(target.at)}" cy="${y(target.percent)}" r="2.5" fill="${targetColor}"/>`
     : ''
   const current = `<g class="current">${usedLine}${projected}</g>`

@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, McpToolResult, Register, Timer } from 'claude-code'
 
-import type { PlanUsage, UsageWindow } from '../types'
+import type { PlanUsage, UsageSource, UsageWindow } from '../types'
 import { formatOutcome } from './format'
 import { GRAPH_HEIGHT, GRAPH_WIDTH, graphSvg } from './graph'
 import { historyFrom, record } from './history'
@@ -40,20 +40,20 @@ let hideSpinner: Timer | undefined
 const textOf = (result: McpToolResult): string =>
   result.content.flatMap(block => (block.type === 'text' ? [block.text] : [])).join('\n')
 
-async function readWindows($: EngineInterface): Promise<UsageWindow[]> {
+async function readWindows($: EngineInterface): Promise<{ windows: UsageWindow[]; source: UsageSource }> {
   try {
     const result = await $.mcp.call(SESSIONS_SERVER, 'get_usage', {})
     if (result.isError) throw new Error(textOf(result))
 
     const windows = windowsFromCard(textOf(result))
-    if (windows.length > 0) return windows
+    if (windows.length > 0) return { windows, source: 'card' }
   } catch {
     // The card is the desktop app's; the engine's reading follows.
   }
 
   const { rateLimits } = await $.session.usage()
 
-  return windowsFromRateLimits(rateLimits)
+  return { windows: windowsFromRateLimits(rateLimits), source: 'engine' }
 }
 
 // Reads the limits unless the last reading is younger than `maxAgeMs` or a read is under way.
@@ -71,9 +71,10 @@ async function refresh($: EngineInterface, maxAgeMs: number, isAsked = false): P
     await update($, isSpinning, () => true)
   }
   try {
-    const next: PlanUsage = { windows: await readWindows($), fetchedAt: at }
+    const { windows, source } = await readWindows($)
+    const next: PlanUsage = { windows, fetchedAt: at }
     // Merged with what other sessions stored since: they all add to one history.
-    const recorded = record(historyFrom(await $.store.get(HISTORY_KEY)), next.windows, at)
+    const recorded = record(historyFrom(await $.store.get(HISTORY_KEY)), windows, at, source)
 
     await $.store.set(HISTORY_KEY, recorded)
     await update($, history, () => recorded)

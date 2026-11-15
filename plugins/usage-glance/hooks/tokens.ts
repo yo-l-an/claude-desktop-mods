@@ -20,8 +20,8 @@ export const THEME_KEYS: Record<Level, 'suggestion' | 'warning' | 'error'> = {
   danger: 'error',
 }
 
-const WARN_FROM = 75
-const DANGER_FROM = 90
+export const WARN_FROM = 75
+export const DANGER_FROM = 90
 
 export const levelOf = (percent: number): Level =>
   percent >= DANGER_FROM ? 'danger' : percent >= WARN_FROM ? 'warn' : 'normal'
