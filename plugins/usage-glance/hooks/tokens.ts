@@ -9,7 +9,7 @@ export const COLORS = {
 // The ring is an image: it cannot read the app's theme. A translucent neutral
 // track blends into either background: #474747 over the dark #191919 (the
 // native track), a light #CECECE over white.
-export const TRACK = { color: '#888888', opacity: 0.41 } as const
+export const TRACK = { color: '#888888', opacity: 0.4 } as const
 
 export type Level = 'normal' | 'warn' | 'danger'
 
@@ -20,7 +20,7 @@ export const THEME_KEYS: Record<Level, 'suggestion' | 'warning' | 'error'> = {
   danger: 'error',
 }
 
-const WARN_FROM = 70
+const WARN_FROM = 75
 const DANGER_FROM = 90
 
 export const levelOf = (percent: number): Level =>
